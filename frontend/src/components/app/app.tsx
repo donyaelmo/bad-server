@@ -21,7 +21,8 @@ import Basket from '@components/basket'
 import CardDetails from '@components/card-details'
 import Header from '@components/header'
 import Modal from '@components/modal'
-import Order, {
+import {
+    Order,
     OrderAddress,
     OrderContacts,
     OrderSuccess,
@@ -67,6 +68,7 @@ const RouteComponent = () => {
     useEffect(() => {
         checkUserAuth()
             .unwrap()
+            .catch(() => undefined)
             .finally(() => authCheck())
     }, [checkUserAuth, authCheck])
 

@@ -13,7 +13,7 @@ const auth = async (req: Request, res: Response, next: NextFunction) => {
     let payload: JwtPayload | null = null
     const authHeader = req.header('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
-        throw new UnauthorizedError('Невалидный токен')
+        return next(new UnauthorizedError('Невалидный токен'))
     }
     try {
         const accessTokenParts = authHeader.split(' ')
@@ -75,22 +75,26 @@ export function currentUserAccessMiddleware<T>(
             return next()
         }
 
-        const entity = await model.findById(id)
+        try {
+            const entity = await model.findById(id)
 
-        if (!entity) {
-            return next(new NotFoundError('Не найдено'))
+            if (!entity) {
+                return next(new NotFoundError('Не найдено'))
+            }
+
+            const userEntityId = entity[userProperty] as Types.ObjectId
+            const hasAccess = new Types.ObjectId(res.locals.user.id).equals(
+                userEntityId
+            )
+
+            if (!hasAccess) {
+                return next(new ForbiddenError('Доступ запрещен'))
+            }
+
+            return next()
+        } catch (error) {
+            return next(error)
         }
-
-        const userEntityId = entity[userProperty] as Types.ObjectId
-        const hasAccess = new Types.ObjectId(res.locals.user.id).equals(
-            userEntityId
-        )
-
-        if (!hasAccess) {
-            return next(new ForbiddenError('Доступ запрещен'))
-        }
-
-        return next()
     }
 }
 

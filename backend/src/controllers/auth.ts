@@ -101,18 +101,15 @@ const deleteRefreshTokenInUser = async (
         rfTkn,
         REFRESH_TOKEN.secret
     ) as JwtPayload
-    const user = await User.findOne({
-        _id: decodedRefreshTkn._id,
-    }).orFail(() => new UnauthorizedError('Пользователь не найден в базе'))
-
     const rTknHash = crypto
         .createHmac('sha256', REFRESH_TOKEN.secret)
         .update(rfTkn)
         .digest('hex')
-
-    user.tokens = user.tokens.filter((tokenObj) => tokenObj.token !== rTknHash)
-
-    await user.save()
+    const user = await User.findOneAndUpdate(
+        { _id: decodedRefreshTkn._id, 'tokens.token': rTknHash },
+        { $pull: { tokens: { token: rTknHash } } },
+        { new: true }
+    ).orFail(() => new UnauthorizedError('Не валидный токен'))
 
     return user
 }
@@ -165,15 +162,13 @@ const refreshAccessToken = async (
 }
 
 const getCurrentUserRoles = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
 ) => {
     const userId = res.locals.user._id
     try {
-        await User.findById(userId, req.body, {
-            new: true,
-        }).orFail(
+        await User.findById(userId).orFail(
             () =>
                 new NotFoundError(
                     'Пользователь по заданному id отсутствует в базе'
@@ -192,9 +187,14 @@ const updateCurrentUser = async (
 ) => {
     const userId = res.locals.user._id
     try {
-        const updatedUser = await User.findByIdAndUpdate(userId, req.body, {
-            new: true,
-        }).orFail(
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: req.body },
+            {
+                runValidators: true,
+                new: true,
+            }
+        ).orFail(
             () =>
                 new NotFoundError(
                     'Пользователь по заданному id отсутствует в базе'

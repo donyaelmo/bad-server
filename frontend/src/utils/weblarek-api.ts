@@ -33,6 +33,7 @@ export type ApiListResponse<Type> = {
 class Api {
     private readonly baseUrl: string
     protected options: RequestInit
+    private csrfRequest?: Promise<string>
 
     constructor(baseUrl: string, options: RequestInit = {}) {
         this.baseUrl = baseUrl
@@ -55,9 +56,29 @@ class Api {
 
     protected async request<T>(endpoint: string, options: RequestInit) {
         try {
+            const headers = new Headers(options.headers)
+            if (
+                !['GET', 'HEAD'].includes(options.method || 'GET') ||
+                ['/auth/token', '/auth/logout'].includes(endpoint)
+            ) {
+                this.csrfRequest ??= fetch(`${this.baseUrl}/auth/csrf-token`, {
+                    credentials: 'include',
+                })
+                    .then((response) =>
+                        this.handleResponse<{ csrfToken: string }>(response)
+                    )
+                    .then(({ csrfToken }) => csrfToken)
+                    .catch((error: unknown) => {
+                        this.csrfRequest = undefined
+                        throw error
+                    })
+                headers.set('X-CSRF-Token', await this.csrfRequest)
+            }
             const res = await fetch(`${this.baseUrl}${endpoint}`, {
                 ...this.options,
                 ...options,
+                headers,
+                credentials: 'include',
             })
             return await this.handleResponse<T>(res)
         } catch (error) {
@@ -79,6 +100,14 @@ class Api {
         try {
             return await this.request<T>(endpoint, options)
         } catch (error) {
+            if (
+                !error ||
+                typeof error !== 'object' ||
+                !('statusCode' in error) ||
+                error.statusCode !== 401
+            ) {
+                return Promise.reject(error)
+            }
             const refreshData = await this.refreshToken()
             if (!refreshData.success) {
                 return Promise.reject(refreshData)

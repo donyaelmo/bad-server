@@ -1,12 +1,22 @@
-# Проектная работа "WebLarek. Плохой сервер.", спринт 17
+# Проектная работа "WebLarek. Плохой сервер.", спринт 18
+
+Автор: Никита Пахуридзе (Гибкий формат обучения)
+Курс: Фуллстек-разработчик
 
 ## Репозиторий
 
 https://github.com/donyaelmo/bad-server
 
+Для запуска npm-команд вне Docker используйте Node.js 22.
+
 ## Подготовка к работе
 1. Склонировать репозиторий
-2. Запустить docker
+2. Создать локальные файлы окружения из примеров и запустить Docker. Для backend в Docker укажите `DB_ADDRESS=mongodb://root:example@mongo:27017/weblarek?authSource=admin`, для frontend — `VITE_API_ORIGIN=http://localhost/api`.
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+Запустить проект
 ```bash
 docker compose up -d
 ```

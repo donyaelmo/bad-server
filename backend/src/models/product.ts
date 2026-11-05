@@ -1,6 +1,6 @@
 import { unlink } from 'fs'
-import mongoose, { Document } from 'mongoose'
-import { join } from 'path'
+import mongoose, { Document, UpdateQuery } from 'mongoose'
+import { basename, join } from 'path'
 
 export interface IFile {
     fileName: string
@@ -50,12 +50,21 @@ cardsSchema.index({ title: 'text' })
 
 // Можно лучше: удалять старое изображением перед обновлением сущности
 cardsSchema.pre('findOneAndUpdate', async function deleteOldImage() {
-    // @ts-ignore
-    const updateImage = this.getUpdate().$set?.image
+    const update = this.getUpdate() as UpdateQuery<IProduct> | null
+    const updateImage = update?.$set?.image
     const docToUpdate = await this.model.findOne(this.getQuery())
-    if (updateImage && docToUpdate) {
+    if (
+        updateImage &&
+        docToUpdate &&
+        updateImage.fileName !== docToUpdate.image.fileName
+    ) {
         unlink(
-            join(__dirname, `../public/${docToUpdate.image.fileName}`),
+            join(
+                __dirname,
+                '../public',
+                process.env.UPLOAD_PATH || 'images',
+                basename(docToUpdate.image.fileName)
+            ),
             (err) => console.log(err)
         )
     }
@@ -63,8 +72,15 @@ cardsSchema.pre('findOneAndUpdate', async function deleteOldImage() {
 
 // Можно лучше: удалять файл с изображением после удаление сущности
 cardsSchema.post('findOneAndDelete', async (doc: IProduct) => {
-    unlink(join(__dirname, `../public/${doc.image.fileName}`), (err) =>
-        console.log(err)
+    if (!doc) return
+    unlink(
+        join(
+            __dirname,
+            '../public',
+            process.env.UPLOAD_PATH || 'images',
+            basename(doc.image.fileName)
+        ),
+        (err) => console.log(err)
     )
 })
 

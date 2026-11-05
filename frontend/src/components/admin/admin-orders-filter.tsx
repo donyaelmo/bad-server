@@ -1,3 +1,5 @@
+import { StatusType } from '@types'
+import { FieldOption } from '../filter/helpers/types'
 import { ordersActions, ordersSelector } from '@slices/orders'
 import { useActionCreators, useDispatch, useSelector } from '@store/hooks'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -15,13 +17,27 @@ export default function AdminFilterOrders() {
     const { updateFilter, clearFilters } = useActionCreators(ordersActions)
     const filterOrderOption = useSelector(ordersSelector.selectFilterOption)
 
-    const handleFilter = (filters: Record<string, any>) => {
-        dispatch(updateFilter({ ...filters, status: filters.status.value }))
+    const handleFilter = (
+        filters: Record<string, string | number | FieldOption>
+    ) => {
+        const status =
+            typeof filters.status === 'object' ? filters.status.value : ''
+        dispatch(
+            updateFilter({
+                ...filters,
+                status:
+                    Object.values(StatusType).find(
+                        (value) => value === status
+                    ) || '',
+            })
+        )
         const queryParams: { [key: string]: string } = {}
         Object.entries(filters).forEach(([key, value]) => {
             if (value) {
                 queryParams[key] =
-                    typeof value === 'object' ? value.value : value.toString()
+                    typeof value === 'object'
+                        ? String(value.value)
+                        : value.toString()
             }
         })
         setSearchParams(queryParams)

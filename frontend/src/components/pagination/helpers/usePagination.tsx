@@ -1,6 +1,7 @@
 import { AsyncThunk } from '@reduxjs/toolkit'
 import { useDispatch, useSelector } from '@store/hooks'
-import { RootState } from '@store/store'
+import { WebLarekAPI } from '@api'
+import { AppDispatch, RootState } from '@store/store'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -15,8 +16,12 @@ interface PaginationResult<_, U> {
     setLimit: (limit: number) => void
 }
 
-const usePagination = <T, U>(
-    asyncAction: AsyncThunk<T, Record<string, unknown>, any>,
+const usePagination = <T extends { pagination: { totalPages: number } }, U>(
+    asyncAction: AsyncThunk<
+        T,
+        Record<string, unknown>,
+        { extra: WebLarekAPI; state: RootState; dispatch: AppDispatch }
+    >,
     selector: (state: RootState) => U[],
     defaultLimit: number
 ): PaginationResult<T, U> => {
@@ -32,22 +37,36 @@ const usePagination = <T, U>(
 
     const limit = Number(searchParams.get('limit')) || defaultLimit
 
-    const fetchData = async (params: Record<string, any>) => {
-        const response: any = await dispatch(asyncAction(params))
-        setTotalPages(response.payload.pagination.totalPages)
-    }
-
     useEffect(() => {
+        let active = true
         const params = Object.fromEntries(searchParams.entries())
-        fetchData({ ...params, page: currentPage, limit }).then(() => {
-            if (data.length === 0 && currentPage > 1) {
-                setPage(1)
-            }
-        })
-    }, [currentPage, limit, searchParams])
+        dispatch(asyncAction({ ...params, page: currentPage, limit }))
+            .unwrap()
+            .then((response) => {
+                if (!active) return
+                setTotalPages(Math.max(1, response.pagination.totalPages))
+                if (currentPage > Math.max(1, response.pagination.totalPages)) {
+                    const updated = new URLSearchParams(searchParams)
+                    updated.set('page', '1')
+                    setSearchParams(updated)
+                }
+            })
+            .catch(() => undefined)
+        return () => {
+            active = false
+        }
+    }, [
+        asyncAction,
+        dispatch,
+        currentPage,
+        limit,
+        searchParams,
+        setSearchParams,
+    ])
 
-    const updateURL = (newParams: Record<string, any>) => {
-        3
+    const updateURL = (
+        newParams: Record<string, string | number | undefined>
+    ) => {
         const updatedParams = new URLSearchParams(searchParams)
         Object.entries(newParams).forEach(([key, value]) => {
             if (value !== undefined) {

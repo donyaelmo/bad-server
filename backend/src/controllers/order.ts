@@ -1,10 +1,16 @@
+import sanitizeHtml from 'sanitize-html'
 import { NextFunction, Request, Response } from 'express'
-import { FilterQuery, Error as MongooseError, Types } from 'mongoose'
+import {
+    FilterQuery,
+    Error as MongooseError,
+    Types,
+    PipelineStage,
+} from 'mongoose'
+import escapeRegExp from '../utils/escapeRegExp'
 import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
 import Order, { IOrder } from '../models/order'
 import Product, { IProduct } from '../models/product'
-import User from '../models/user'
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
@@ -31,12 +37,7 @@ export const getOrders = async (
         const filters: FilterQuery<Partial<IOrder>> = {}
 
         if (status) {
-            if (typeof status === 'object') {
-                Object.assign(filters, status)
-            }
-            if (typeof status === 'string') {
-                filters.status = status
-            }
+            filters.status = status
         }
 
         if (totalAmountFrom) {
@@ -67,7 +68,7 @@ export const getOrders = async (
             }
         }
 
-        const aggregatePipeline: any[] = [
+        const aggregatePipeline: PipelineStage[] = [
             { $match: filters },
             {
                 $lookup: {
@@ -85,15 +86,18 @@ export const getOrders = async (
                     as: 'customer',
                 },
             },
+            { $unset: ['customer.password', 'customer.tokens'] },
             { $unwind: '$customer' },
             { $unwind: '$products' },
         ]
 
         if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+            const searchRegex = new RegExp(escapeRegExp(search as string), 'i')
             const searchNumber = Number(search)
 
-            const searchConditions: any[] = [{ 'products.title': searchRegex }]
+            const searchConditions: FilterQuery<IOrder>[] = [
+                { 'products.title': searchRegex },
+            ]
 
             if (!Number.isNaN(searchNumber)) {
                 searchConditions.push({ orderNumber: searchNumber })
@@ -104,35 +108,44 @@ export const getOrders = async (
                     $or: searchConditions,
                 },
             })
-
-            filters.$or = searchConditions
         }
 
-        const sort: { [key: string]: any } = {}
+        const sort: Record<string, 1 | -1> = {}
 
         if (sortField && sortOrder) {
             sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
         }
 
-        aggregatePipeline.push(
-            { $sort: sort },
-            { $skip: (Number(page) - 1) * Number(limit) },
-            { $limit: Number(limit) },
-            {
-                $group: {
-                    _id: '$_id',
-                    orderNumber: { $first: '$orderNumber' },
-                    status: { $first: '$status' },
-                    totalAmount: { $first: '$totalAmount' },
-                    products: { $push: '$products' },
-                    customer: { $first: '$customer' },
-                    createdAt: { $first: '$createdAt' },
-                },
-            }
-        )
+        aggregatePipeline.push({
+            $group: {
+                _id: '$_id',
+                orderNumber: { $first: '$orderNumber' },
+                status: { $first: '$status' },
+                totalAmount: { $first: '$totalAmount' },
+                products: { $push: '$products' },
+                customer: { $first: '$customer' },
+                createdAt: { $first: '$createdAt' },
+            },
+        })
 
-        const orders = await Order.aggregate(aggregatePipeline)
-        const totalOrders = await Order.countDocuments(filters)
+        const [result] = await Order.aggregate<{
+            orders: IOrder[]
+            count: { total: number }[]
+        }>([
+            ...aggregatePipeline,
+            {
+                $facet: {
+                    orders: [
+                        { $sort: sort },
+                        { $skip: (Number(page) - 1) * Number(limit) },
+                        { $limit: Number(limit) },
+                    ],
+                    count: [{ $count: 'total' }],
+                },
+            },
+        ])
+        const { orders } = result
+        const totalOrders = result.count[0]?.total || 0
         const totalPages = Math.ceil(totalOrders / Number(limit))
 
         res.status(200).json({
@@ -162,52 +175,24 @@ export const getOrdersCurrentUser = async (
             limit: Number(limit),
         }
 
-        const user = await User.findById(userId)
-            .populate({
-                path: 'orders',
-                populate: [
-                    {
-                        path: 'products',
-                    },
-                    {
-                        path: 'customer',
-                    },
-                ],
-            })
-            .orFail(
-                () =>
-                    new NotFoundError(
-                        'Пользователь по заданному id отсутствует в базе'
-                    )
-            )
-
-        let orders = user.orders as unknown as IOrder[]
-
+        const filters: FilterQuery<IOrder> = { customer: userId }
         if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
-            const products = await Product.find({ title: searchRegex })
-            const productIds = products.map((product) => product._id)
-
-            orders = orders.filter((order) => {
-                // eslint-disable-next-line max-len
-                const matchesProductTitle = order.products.some((product) =>
-                    productIds.some((id) => id.equals(product._id))
-                )
-                // eslint-disable-next-line max-len
-                const matchesOrderNumber =
-                    !Number.isNaN(searchNumber) &&
-                    order.orderNumber === searchNumber
-
-                return matchesOrderNumber || matchesProductTitle
-            })
+            const products = await Product.find({
+                title: new RegExp(escapeRegExp(search as string), 'i'),
+            }).select('_id')
+            filters.$or = [
+                { products: { $in: products.map((product) => product._id) } },
+            ]
+            if (Number.isFinite(Number(search)))
+                filters.$or.push({ orderNumber: Number(search) })
         }
-
-        const totalOrders = orders.length
+        const orders = await Order.find(filters)
+            .sort({ createdAt: -1 })
+            .skip(options.skip)
+            .limit(options.limit)
+            .populate(['customer', 'products'])
+        const totalOrders = await Order.countDocuments(filters)
         const totalPages = Math.ceil(totalOrders / Number(limit))
-
-        orders = orders.slice(options.skip, options.skip + options.limit)
 
         return res.send({
             orders,
@@ -315,7 +300,7 @@ export const createOrder = async (
             payment,
             phone,
             email,
-            comment,
+            comment: sanitizeHtml(comment || ''),
             customer: userId,
             deliveryAddress: address,
         })

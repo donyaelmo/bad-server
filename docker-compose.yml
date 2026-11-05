@@ -21,6 +21,17 @@ services:
       - internal
 
   backend:
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/auth/csrf-token').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: always
     build:
       context: backend
@@ -37,6 +48,11 @@ services:
       - mongo
 
   server:
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     build:
       context: nginx
     ports:
@@ -45,8 +61,10 @@ services:
       - frontend:/var/app
       - public:/var/public
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
     networks:
       - internal
 

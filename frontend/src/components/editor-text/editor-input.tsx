@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify'
 import {
     ContentEditableEvent,
     createButton,
@@ -14,7 +15,7 @@ type EditorInputProps = {
 
 export default function EditorInput({ onChange, value }: EditorInputProps) {
     function handleChangeElement(e: ContentEditableEvent) {
-        onChange(e.target.value)
+        onChange(DOMPurify.sanitize(e.target.value))
     }
 
     const BtnLinkCustom = createButton(
@@ -24,7 +25,6 @@ export default function EditorInput({ onChange, value }: EditorInputProps) {
             if ($selection?.nodeName === 'A') {
                 document.execCommand('unlink')
             } else {
-                // eslint-disable-next-line no-alert
                 document.execCommand(
                     'createLink',
                     false,
@@ -37,7 +37,10 @@ export default function EditorInput({ onChange, value }: EditorInputProps) {
     return (
         <div className='customEditor'>
             <EditorProvider>
-                <Editor value={value} onChange={handleChangeElement}>
+                <Editor
+                    value={DOMPurify.sanitize(value)}
+                    onChange={handleChangeElement}
+                >
                     <Toolbar>
                         <span className='rsw-link-title'>
                             Вставить ссылку <BtnLinkCustom />
